@@ -46,6 +46,7 @@ El comando genera métricas detalladas, métricas agregadas, respuestas trazadas
 | `paper_visuals/` | Capa editorial con gráficos científicos estilizados, métricas matemáticas de coste y geometría semántica 3D. |
 | `paper_visuals/tables/paper_cost_metrics.csv` | Tabla de coste compuesto, utilidad neta, eficiencia de tokens y eficiencia temporal. |
 | `paper_visuals/tables/paper_semantic_geometry_metrics.csv` | Tabla de compacidad, separación, desplazamiento semántico y cociente geométrico por patrón. |
+| `papr-segments/` | Segmentos Markdown independientes para integrar método, pipeline, evaluación, coste y resultados en el paper. |
 | `docs/final_report.md` | Interpretación científica de H1-H5. |
 
 ## Resultados principales
@@ -79,6 +80,18 @@ La geometría semántica se calcula de forma determinista sobre preguntas, respu
 ![Geometría semántica 3D](paper_visuals/figures/paper_semantic_embedding_3d.png)
 
 El análisis completo está en [`docs/final_report.md`](docs/final_report.md), la especificación matemática está en [`docs/cost_model_and_visual_spec.md`](docs/cost_model_and_visual_spec.md), y las tablas reproducibles están en [`results/`](results/) y [`paper_visuals/tables/`](paper_visuals/tables/).
+
+## Segmentos independientes para el paper
+
+La carpeta [`papr-segments/`](papr-segments/) contiene cinco archivos Markdown independientes y detallados para acelerar la redacción del producto científico. Estos segmentos cubren el marco experimental y corpus, la implementación de los harness, la metodología de evaluación, las ecuaciones de coste y eficiencia, y la narrativa de resultados con visualizaciones y citas. Cada segmento incluye tablas, ecuaciones, referencias académicas y vínculos operativos hacia los resultados reproducibles del repositorio.
+
+| Segmento | Archivo |
+|---|---|
+| Marco experimental y corpus | [`papr-segments/01_marco_experimental_y_corpus.md`](papr-segments/01_marco_experimental_y_corpus.md) |
+| Implementación de harness y pipeline | [`papr-segments/02_implementacion_harness_pipeline.md`](papr-segments/02_implementacion_harness_pipeline.md) |
+| Metodología de evaluación y métricas | [`papr-segments/03_metodologia_evaluacion_metricas.md`](papr-segments/03_metodologia_evaluacion_metricas.md) |
+| Ecuaciones de coste y eficiencia | [`papr-segments/04_ecuaciones_coste_eficiencia.md`](papr-segments/04_ecuaciones_coste_eficiencia.md) |
+| Resultados, visualizaciones y citas | [`papr-segments/05_resultados_visualizaciones_citas.md`](papr-segments/05_resultados_visualizaciones_citas.md) |
 
 ## Arquitectura
 
