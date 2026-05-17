@@ -370,7 +370,19 @@ def plot_parallel(df: pd.DataFrame, cols: list[str]) -> go.Figure:
     return fig_layout(fig, "Coordenadas paralelas para análisis multiobjetivo")
 
 
-def plot_embeddings(embeddings: pd.DataFrame, color_by: str) -> go.Figure:
+def camera_eye_from_angles(azimuth_degrees: float, elevation_degrees: float, zoom: float) -> dict[str, float]:
+    """Convert human-readable 3D camera controls into Plotly scene camera coordinates."""
+    azimuth = np.deg2rad(float(azimuth_degrees))
+    elevation = np.deg2rad(float(elevation_degrees))
+    radius = max(float(zoom), 0.25)
+    return {
+        "x": radius * np.cos(elevation) * np.cos(azimuth),
+        "y": radius * np.cos(elevation) * np.sin(azimuth),
+        "z": radius * np.sin(elevation),
+    }
+
+
+def plot_embeddings(embeddings: pd.DataFrame, color_by: str, camera_eye: dict[str, float] | None = None) -> go.Figure:
     color_col = color_by if color_by in embeddings else "pattern"
     fig = px.scatter_3d(
         embeddings,
@@ -383,7 +395,22 @@ def plot_embeddings(embeddings: pd.DataFrame, color_by: str) -> go.Figure:
         color_discrete_map=PATTERN_COLORS if color_col == "pattern" else None,
     )
     fig.update_traces(marker={"size": 5, "opacity": 0.88})
-    return fig_layout(fig, "Explorador 3D de embeddings semánticos")
+    fig = fig_layout(fig, "Explorador 3D de embeddings semánticos")
+    fig.update_layout(
+        dragmode="turntable",
+        uirevision="semantic_embeddings_camera",
+        scene={
+            "xaxis_title": "embedding_x",
+            "yaxis_title": "embedding_y",
+            "zaxis_title": "embedding_z",
+            "aspectmode": "cube",
+            "camera": {
+                "eye": camera_eye or {"x": 1.35, "y": 1.35, "z": 0.95},
+                "up": {"x": 0, "y": 0, "z": 1},
+            },
+        },
+    )
+    return fig
 
 
 def plot_retrieval_heatmap(df: pd.DataFrame, answers: pd.DataFrame) -> go.Figure:
@@ -666,23 +693,89 @@ def main() -> None:
             & embeddings_default["question_type"].isin(question_types)
             & embeddings_default["risk"].isin(risks)
         ].copy()
-        color_by = st.selectbox("Colorear embeddings por", [c for c in ["pattern", "question_type", "risk", "decision"] if c in embedding_filtered])
+
+        st.markdown("### Cámara 3D e interacción inmersiva")
+        st.info(
+            "El panel de cámara ya está visible en esta pestaña. Use los sliders para fijar la cámara virtual del gráfico; "
+            "también puede rotar la nube directamente con mouse, trackpad o pantalla táctil, hacer zoom con la rueda/gesto de pellizco "
+            "y usar doble clic para recentrar la escena."
+        )
+
+        camera_presets = {
+            "Isométrica para paper": {"azimuth": 45, "elevation": 28, "zoom": 1.85},
+            "Frontal": {"azimuth": 0, "elevation": 12, "zoom": 1.75},
+            "Lateral": {"azimuth": 90, "elevation": 12, "zoom": 1.75},
+            "Superior": {"azimuth": 45, "elevation": 82, "zoom": 1.95},
+            "Detalle cercano": {"azimuth": 35, "elevation": 18, "zoom": 1.15},
+        }
+        control_col, browser_camera_col = st.columns([1.15, 0.85])
+        with control_col:
+            st.markdown("#### Cámara virtual del gráfico 3D")
+            color_by = st.selectbox("Colorear embeddings por", [c for c in ["pattern", "question_type", "risk", "decision"] if c in embedding_filtered])
+            camera_preset = st.selectbox("Vista rápida", list(camera_presets.keys()))
+            defaults = camera_presets[camera_preset]
+            azimuth = st.slider(
+                "Azimuth horizontal de cámara",
+                min_value=0,
+                max_value=360,
+                value=int(defaults["azimuth"]),
+                step=5,
+                key=f"embedding_azimuth_{camera_preset}",
+                help="Gira la cámara alrededor del eje vertical del espacio semántico.",
+            )
+            elevation = st.slider(
+                "Elevación vertical de cámara",
+                min_value=-20,
+                max_value=90,
+                value=int(defaults["elevation"]),
+                step=2,
+                key=f"embedding_elevation_{camera_preset}",
+                help="Sube o baja el punto de vista para inspeccionar la separación entre clusters.",
+            )
+            zoom = st.slider(
+                "Zoom / distancia de cámara",
+                min_value=0.60,
+                max_value=3.00,
+                value=float(defaults["zoom"]),
+                step=0.05,
+                key=f"embedding_zoom_{camera_preset}",
+                help="Valores menores acercan la cámara; valores mayores muestran más contexto.",
+            )
+            chart_height = st.slider("Altura del gráfico", min_value=520, max_value=920, value=720, step=20)
+            camera_eye = camera_eye_from_angles(azimuth, elevation, zoom)
+            st.caption(
+                f"Vector de cámara aplicado: x={camera_eye['x']:.2f}, y={camera_eye['y']:.2f}, z={camera_eye['z']:.2f}."
+            )
+
+        with browser_camera_col:
+            st.markdown("#### Cámara local del navegador")
+            st.markdown(
+                "Active este panel si desea abrir la cámara del equipo durante una demostración o calibración visual. "
+                "La aplicación solo usa el componente local del navegador; no envía la imagen a servicios externos."
+            )
+            enable_camera = st.toggle(
+                "Activar cámara local",
+                value=False,
+                help="El navegador pedirá permiso. Si no aparece la vista previa, revise permisos del sitio y que la página se abra en localhost o HTTPS.",
+            )
+            if enable_camera:
+                camera_capture = st.camera_input("Vista previa / captura local para calibración visual")
+                if camera_capture is not None:
+                    st.success("Captura recibida localmente en la sesión del dashboard.")
+            else:
+                st.caption("La cámara permanece apagada. Active el interruptor anterior para mostrar el componente de cámara.")
+
         if not embedding_filtered.empty:
-            fig_embeddings = plot_embeddings(embedding_filtered, color_by)
-            st.plotly_chart(fig_embeddings, use_container_width=True)
+            fig_embeddings = plot_embeddings(embedding_filtered, color_by, camera_eye=camera_eye)
+            fig_embeddings.update_layout(height=chart_height)
+            st.plotly_chart(
+                fig_embeddings,
+                use_container_width=True,
+                config={"displayModeBar": True, "scrollZoom": True, "responsive": True},
+            )
             download_plotly_html(fig_embeddings, "semantic_embeddings_3d.html")
         else:
             st.warning("No hay embeddings disponibles bajo los filtros actuales.")
-
-        with st.expander("Control táctil, gestos y privacidad"):
-            st.markdown(
-                """
-                Plotly permite rotar y hacer zoom en la nube 3D con mouse, trackpad o pantalla táctil. Para demostraciones inmersivas, esta sección puede activar una captura de cámara local mediante el navegador. La imagen no se envía a servicios externos por esta aplicación; el usuario debe conceder permiso explícito en el navegador y puede omitir la función.
-                """
-            )
-            enable_camera = st.toggle("Activar panel opcional de cámara para prototipos de gestos", value=False)
-            if enable_camera:
-                st.camera_input("Captura local opcional para calibración visual de gestos")
 
     # ---------- Export and methodology ----------
     with tabs[5]:
