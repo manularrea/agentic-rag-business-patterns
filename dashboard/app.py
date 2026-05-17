@@ -20,6 +20,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = ROOT / "results"
@@ -382,6 +383,56 @@ def camera_eye_from_angles(azimuth_degrees: float, elevation_degrees: float, zoo
     }
 
 
+def infer_camera_controls_from_capture(camera_capture) -> tuple[int, int, float, dict[str, float]]:
+    """Infer a deterministic 3D view from a local browser camera capture.
+
+    Streamlit's native camera component returns a still image rather than a live
+    gesture stream. This function makes the feature operational by mapping the
+    dominant foreground/hand-like region in the capture to azimuth, elevation and
+    zoom controls for the Plotly embedding view.
+    """
+    image = Image.open(io.BytesIO(camera_capture.getvalue())).convert("RGB")
+    image = image.resize((192, 144))
+    arr = np.asarray(image).astype(float) / 255.0
+    red, green, blue = arr[..., 0], arr[..., 1], arr[..., 2]
+    luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+    skin_like = (
+        (red > 0.32)
+        & (green > 0.18)
+        & (blue > 0.10)
+        & (red > green * 1.05)
+        & (red > blue * 1.18)
+        & ((red - green) < 0.45)
+    )
+    foreground = np.abs(luminance - np.median(luminance)) > 0.12
+    mask = skin_like if skin_like.mean() > 0.006 else foreground
+
+    if mask.mean() < 0.003:
+        weights = np.clip(luminance - luminance.min(), 0, None) + 1e-6
+        detection_mode = "luminancia global"
+    else:
+        weights = mask.astype(float) * (0.35 + luminance)
+        detection_mode = "región mano/primer plano"
+
+    yy, xx = np.indices(luminance.shape)
+    total_weight = float(weights.sum()) + 1e-9
+    x_center = float((xx * weights).sum() / total_weight) / max(luminance.shape[1] - 1, 1)
+    y_center = float((yy * weights).sum() / total_weight) / max(luminance.shape[0] - 1, 1)
+    coverage = float(mask.mean())
+
+    azimuth = int(np.clip(round(x_center * 360), 0, 360))
+    elevation = int(np.clip(round(80 - y_center * 100), -20, 90))
+    zoom = float(np.clip(2.55 - coverage * 9.0, 0.70, 2.80))
+    diagnostics = {
+        "x_center": x_center,
+        "y_center": y_center,
+        "coverage": coverage,
+        "detection_mode": detection_mode,
+    }
+    return azimuth, elevation, zoom, diagnostics
+
+
 def plot_embeddings(embeddings: pd.DataFrame, color_by: str, camera_eye: dict[str, float] | None = None) -> go.Figure:
     color_col = color_by if color_by in embeddings else "pattern"
     fig = px.scatter_3d(
@@ -708,50 +759,19 @@ def main() -> None:
             "Superior": {"azimuth": 45, "elevation": 82, "zoom": 1.95},
             "Detalle cercano": {"azimuth": 35, "elevation": 18, "zoom": 1.15},
         }
+        st.session_state.setdefault("embedding_camera_azimuth", camera_presets["Isométrica para paper"]["azimuth"])
+        st.session_state.setdefault("embedding_camera_elevation", camera_presets["Isométrica para paper"]["elevation"])
+        st.session_state.setdefault("embedding_camera_zoom", camera_presets["Isométrica para paper"]["zoom"])
+        st.session_state.setdefault("embedding_camera_last_capture", None)
+
         control_col, browser_camera_col = st.columns([1.15, 0.85])
-        with control_col:
-            st.markdown("#### Cámara virtual del gráfico 3D")
-            color_by = st.selectbox("Colorear embeddings por", [c for c in ["pattern", "question_type", "risk", "decision"] if c in embedding_filtered])
-            camera_preset = st.selectbox("Vista rápida", list(camera_presets.keys()))
-            defaults = camera_presets[camera_preset]
-            azimuth = st.slider(
-                "Azimuth horizontal de cámara",
-                min_value=0,
-                max_value=360,
-                value=int(defaults["azimuth"]),
-                step=5,
-                key=f"embedding_azimuth_{camera_preset}",
-                help="Gira la cámara alrededor del eje vertical del espacio semántico.",
-            )
-            elevation = st.slider(
-                "Elevación vertical de cámara",
-                min_value=-20,
-                max_value=90,
-                value=int(defaults["elevation"]),
-                step=2,
-                key=f"embedding_elevation_{camera_preset}",
-                help="Sube o baja el punto de vista para inspeccionar la separación entre clusters.",
-            )
-            zoom = st.slider(
-                "Zoom / distancia de cámara",
-                min_value=0.60,
-                max_value=3.00,
-                value=float(defaults["zoom"]),
-                step=0.05,
-                key=f"embedding_zoom_{camera_preset}",
-                help="Valores menores acercan la cámara; valores mayores muestran más contexto.",
-            )
-            chart_height = st.slider("Altura del gráfico", min_value=520, max_value=920, value=720, step=20)
-            camera_eye = camera_eye_from_angles(azimuth, elevation, zoom)
-            st.caption(
-                f"Vector de cámara aplicado: x={camera_eye['x']:.2f}, y={camera_eye['y']:.2f}, z={camera_eye['z']:.2f}."
-            )
 
         with browser_camera_col:
-            st.markdown("#### Cámara local del navegador")
+            st.markdown("#### Cámara local que controla el embedding")
             st.markdown(
-                "Active este panel si desea abrir la cámara del equipo durante una demostración o calibración visual. "
-                "La aplicación solo usa el componente local del navegador; no envía la imagen a servicios externos."
+                "Active la cámara, coloque la mano o un objeto visible dentro del encuadre y pulse **Take Photo**. "
+                "La captura se analiza localmente para mover la cámara virtual del gráfico 3D: izquierda/derecha cambia azimuth, "
+                "arriba/abajo cambia elevación y el área detectada ajusta zoom."
             )
             enable_camera = st.toggle(
                 "Activar cámara local",
@@ -759,11 +779,73 @@ def main() -> None:
                 help="El navegador pedirá permiso. Si no aparece la vista previa, revise permisos del sitio y que la página se abra en localhost o HTTPS.",
             )
             if enable_camera:
-                camera_capture = st.camera_input("Vista previa / captura local para calibración visual")
+                camera_capture = st.camera_input("Captura para controlar la vista 3D")
                 if camera_capture is not None:
-                    st.success("Captura recibida localmente en la sesión del dashboard.")
+                    capture_bytes = camera_capture.getvalue()
+                    capture_hash = hash(capture_bytes)
+                    if st.session_state["embedding_camera_last_capture"] != capture_hash:
+                        cam_azimuth, cam_elevation, cam_zoom, diagnostics = infer_camera_controls_from_capture(camera_capture)
+                        st.session_state["embedding_camera_azimuth"] = cam_azimuth
+                        st.session_state["embedding_camera_elevation"] = cam_elevation
+                        st.session_state["embedding_camera_zoom"] = cam_zoom
+                        st.session_state["embedding_camera_last_capture"] = capture_hash
+                        st.success(
+                            "Captura aplicada al embedding: "
+                            f"azimuth={cam_azimuth}°, elevación={cam_elevation}°, zoom={cam_zoom:.2f}."
+                        )
+                        st.caption(
+                            "Diagnóstico local: "
+                            f"modo={diagnostics['detection_mode']}, centro=({diagnostics['x_center']:.2f}, {diagnostics['y_center']:.2f}), "
+                            f"cobertura={diagnostics['coverage']:.3f}."
+                        )
+                    else:
+                        st.info("Esta captura ya está aplicada. Tome otra foto para mover de nuevo el embedding.")
             else:
-                st.caption("La cámara permanece apagada. Active el interruptor anterior para mostrar el componente de cámara.")
+                st.caption("La cámara permanece apagada. Use los controles manuales o active el interruptor para controlar el embedding con una captura.")
+
+        with control_col:
+            st.markdown("#### Cámara virtual del gráfico 3D")
+            color_options = [c for c in ["pattern", "question_type", "risk", "decision"] if c in embedding_filtered]
+            color_by = st.selectbox("Colorear embeddings por", color_options or ["pattern"])
+            preset_col, apply_col = st.columns([0.65, 0.35])
+            with preset_col:
+                camera_preset = st.selectbox("Vista rápida", list(camera_presets.keys()))
+            with apply_col:
+                st.write("")
+                if st.button("Aplicar vista", use_container_width=True):
+                    defaults = camera_presets[camera_preset]
+                    st.session_state["embedding_camera_azimuth"] = defaults["azimuth"]
+                    st.session_state["embedding_camera_elevation"] = defaults["elevation"]
+                    st.session_state["embedding_camera_zoom"] = defaults["zoom"]
+            azimuth = st.slider(
+                "Azimuth horizontal de cámara",
+                min_value=0,
+                max_value=360,
+                step=5,
+                key="embedding_camera_azimuth",
+                help="Gira la cámara alrededor del eje vertical del espacio semántico.",
+            )
+            elevation = st.slider(
+                "Elevación vertical de cámara",
+                min_value=-20,
+                max_value=90,
+                step=2,
+                key="embedding_camera_elevation",
+                help="Sube o baja el punto de vista para inspeccionar la separación entre clusters.",
+            )
+            zoom = st.slider(
+                "Zoom / distancia de cámara",
+                min_value=0.60,
+                max_value=3.00,
+                step=0.05,
+                key="embedding_camera_zoom",
+                help="Valores menores acercan la cámara; valores mayores muestran más contexto.",
+            )
+            chart_height = st.slider("Altura del gráfico", min_value=520, max_value=920, value=720, step=20)
+            camera_eye = camera_eye_from_angles(azimuth, elevation, zoom)
+            st.caption(
+                f"Vector de cámara aplicado: x={camera_eye['x']:.2f}, y={camera_eye['y']:.2f}, z={camera_eye['z']:.2f}."
+            )
 
         if not embedding_filtered.empty:
             fig_embeddings = plot_embeddings(embedding_filtered, color_by, camera_eye=camera_eye)
