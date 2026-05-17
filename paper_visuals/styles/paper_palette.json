@@ -1,0 +1,10 @@
+{
+  "single_agent": "#2E5EAA",
+  "parent_child": "#2E8B57",
+  "mixture_of_agents": "#D9822B",
+  "handoff": "#7A4E9D",
+  "cost": "#8C2D04",
+  "quality": "#1B4965",
+  "grid": "#D9DEE8",
+  "text": "#1F2933"
+}

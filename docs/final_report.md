@@ -39,6 +39,27 @@ La **factualidad** mide la proporción de afirmaciones soportadas por hechos rec
 
 ![Mapa de calor de evidencia](../results/figures/hypothesis_evidence_heatmap.png)
 
+## Soporte matemático ampliado: coste y geometría semántica
+
+Para fortalecer el soporte técnico del paper, se añadió una capa editorial en `paper_visuals/` que calcula métricas matemáticas complementarias y genera figuras científicas de alto impacto. El coste operativo compuesto se modela como \(C_p = 0.4\hat{T}_p + 0.4\hat{L}_p + 0.2\hat{S}_p\), donde tokens, latencia y complejidad de traza se normalizan con min-max. La utilidad neta se define como \(U_p = Q_p - 0.35C_p\), de modo que un patrón solo se favorece si su mejora de calidad justifica su penalización operacional.
+
+![Frontera calidad-coste editorial](../paper_visuals/figures/paper_cost_quality_frontier.png)
+
+La segunda ampliación es una lectura de **geometría semántica**. Cada respuesta se transforma en un vector textual que integra pregunta, tipo de tarea, riesgo, dominio, decisión, respuesta, citas, hechos y trazas; luego se aplica TF-IDF con n-gramas y reducción SVD a 3D, técnica asociada al análisis semántico latente para proyectar matrices texto-documento de alta dimensionalidad [5]. Esta visualización no implica que el recuperador cambie su embedding por patrón; muestra cómo las salidas y decisiones de cada patrón ocupan regiones semánticas distintas.
+
+![Geometría semántica 3D por patrón](../paper_visuals/figures/paper_semantic_embedding_3d.png)
+
+| Patrón | Compacidad semántica | Separación semántica | Desplazamiento vs Single-Agent | Cociente S/C | Calidad local |
+|---|---:|---:|---:|---:|---:|
+| Mixture-of-Agents | 0.390 | 0.557 | 0.307 | 1.430 | 0.811 |
+| Parent-Child | 0.436 | 0.544 | 0.318 | 1.249 | 0.784 |
+| Handoff | 0.494 | 0.562 | 0.380 | 1.137 | 0.652 |
+| Single-Agent | 0.481 | 0.514 | 0.000 | 1.070 | 0.644 |
+
+El cociente \(S/C\) mide separación inter-centroide dividida por dispersión intra-patrón. Mixture-of-Agents alcanza el valor más alto, lo cual es coherente con su mayor completitud en síntesis multi-documento y con la presencia de un agregador que combina perspectivas paralelas. Parent-Child ocupa la segunda posición y conserva mejor balance operativo, reforzando H2. Handoff presenta el mayor desplazamiento frente al baseline porque cambia la decisión esperada en preguntas ambiguas o sensibles; esta distancia semántica se interpreta como evidencia de transferencia o rechazo, no como deterioro de respuesta.
+
+![Métricas de geometría semántica](../paper_visuals/figures/paper_semantic_geometry_metrics.png)
+
 ## Evaluación de hipótesis
 
 ### H1: patrones multi-agente frente a baseline mono-agente
@@ -120,7 +141,7 @@ pytest
 python scripts/run_experiment.py
 ```
 
-Los resultados quedan en `results/`, las figuras en `results/figures/` y la metodología ampliada en `docs/methodology.md`.
+Los resultados quedan en `results/`, las figuras base en `results/figures/`, las figuras editoriales del paper en `paper_visuals/figures/`, las tablas matemáticas en `paper_visuals/tables/` y la metodología ampliada en `docs/methodology.md`. Para regenerar la capa visual del paper debe ejecutarse `python paper_visuals/scripts/create_paper_figures.py` después del benchmark.
 
 ## Referencias
 
@@ -128,3 +149,4 @@ Los resultados quedan en `results/`, las figuras en `results/figures/` y la meto
 [2]: https://arxiv.org/abs/2308.08155 "A Survey on Large Language Model based Autonomous Agents"
 [3]: https://arxiv.org/abs/2402.01680 "Mixture-of-Agents Enhances Large Language Model Capabilities"
 [4]: https://www.nist.gov/itl/ai-risk-management-framework "NIST AI Risk Management Framework"
+[5]: https://doi.org/10.1137/1.9780898719769.ch5 "Latent Semantic Indexing via Singular Value Decomposition"

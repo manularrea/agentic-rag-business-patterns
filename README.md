@@ -42,7 +42,10 @@ El comando genera métricas detalladas, métricas agregadas, respuestas trazadas
 | `results/detailed_metrics.csv` | Métrica por pregunta y patrón. |
 | `results/aggregate_metrics.csv` | Métricas promedio por patrón e índices compuestos. |
 | `results/answers.csv` | Respuestas, citas, hechos usados y trazas. |
-| `results/figures/*.png` | Visualizaciones publicables. |
+| `results/figures/*.png` | Visualizaciones base publicables. |
+| `paper_visuals/` | Capa editorial con gráficos científicos estilizados, métricas matemáticas de coste y geometría semántica 3D. |
+| `paper_visuals/tables/paper_cost_metrics.csv` | Tabla de coste compuesto, utilidad neta, eficiencia de tokens y eficiencia temporal. |
+| `paper_visuals/tables/paper_semantic_geometry_metrics.csv` | Tabla de compacidad, separación, desplazamiento semántico y cociente geométrico por patrón. |
 | `docs/final_report.md` | Interpretación científica de H1-H5. |
 
 ## Resultados principales
@@ -59,7 +62,23 @@ La ejecución incluida en este repositorio soporta las cinco hipótesis de traba
 
 ![Resumen de hipótesis](results/figures/hypothesis_summary.png)
 
-El análisis completo está en [`docs/final_report.md`](docs/final_report.md), y las tablas reproducibles están en [`results/`](results/).
+## Soporte matemático y visual para paper
+
+Además de las salidas base en `results/`, el repositorio incluye una carpeta dedicada a visualización científica: [`paper_visuals/`](paper_visuals/). Esta capa transforma los resultados del benchmark en figuras de alto impacto a 300 dpi y tablas matemáticas citables. El coste operativo compuesto se define como \(C_p = 0.4\hat{T}_p + 0.4\hat{L}_p + 0.2\hat{S}_p\), donde \(\hat{T}_p\) representa tokens normalizados, \(\hat{L}_p\) latencia normalizada y \(\hat{S}_p\) complejidad de traza normalizada. La utilidad neta se define como \(U_p = Q_p - 0.35C_p\), lo cual permite discutir calidad bajo penalización operacional.
+
+| Entregable | Uso en el paper |
+|---|---|
+| `paper_visuals/figures/paper_cost_quality_frontier.png` | Frontera calidad-coste para defender H1, H2 y H3. |
+| `paper_visuals/figures/paper_net_utility.png` | Selección comparativa usando utilidad penalizada por coste. |
+| `paper_visuals/figures/paper_semantic_embedding_3d.png` | Visualización 3D de geometría semántica por patrón agentic. |
+| `paper_visuals/figures/paper_semantic_geometry_metrics.png` | Comparación matemática de separación y compacidad semántica. |
+| `paper_visuals/tables/paper_semantic_embeddings_3d.csv` | Coordenadas reproducibles por respuesta para auditoría y reuso. |
+
+La geometría semántica se calcula de forma determinista sobre preguntas, respuestas, decisiones, citas, hechos y trazas reales del benchmark usando representación TF-IDF con n-gramas y reducción SVD a tres dimensiones, una técnica estándar para reducir matrices texto-documento de alta dimensionalidad en análisis semántico latente [5]. Para cada patrón se reporta compacidad intra-patrón, separación inter-centroide, desplazamiento respecto al baseline Single-Agent y el cociente \(S/C\). En la ejecución incluida, Mixture-of-Agents obtiene el mayor cociente de separación/compacidad \(S/C = 1.43\), seguido por Parent-Child \(S/C = 1.25\), Handoff \(S/C = 1.14\) y Single-Agent \(S/C = 1.07\), lo que aporta soporte geométrico adicional a la hipótesis de especialización semántica inducida por los patrones multi-agente.
+
+![Geometría semántica 3D](paper_visuals/figures/paper_semantic_embedding_3d.png)
+
+El análisis completo está en [`docs/final_report.md`](docs/final_report.md), la especificación matemática está en [`docs/cost_model_and_visual_spec.md`](docs/cost_model_and_visual_spec.md), y las tablas reproducibles están en [`results/`](results/) y [`paper_visuals/tables/`](paper_visuals/tables/).
 
 ## Arquitectura
 
@@ -85,3 +104,4 @@ El proyecto usa recuperación lexical determinista y generación extractiva cont
 [2]: https://arxiv.org/abs/2402.01680 "Mixture-of-Agents Enhances Large Language Model Capabilities"
 [3]: https://arxiv.org/abs/2308.08155 "A Survey on Large Language Model based Autonomous Agents"
 [4]: https://www.nist.gov/itl/ai-risk-management-framework "NIST AI Risk Management Framework"
+[5]: https://doi.org/10.1137/1.9780898719769.ch5 "Latent Semantic Indexing via Singular Value Decomposition"
