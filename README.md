@@ -47,6 +47,7 @@ El comando genera métricas detalladas, métricas agregadas, respuestas trazadas
 | `paper_visuals/tables/paper_cost_metrics.csv` | Tabla de coste compuesto, utilidad neta, eficiencia de tokens y eficiencia temporal. |
 | `paper_visuals/tables/paper_semantic_geometry_metrics.csv` | Tabla de compacidad, separación, desplazamiento semántico y cociente geométrico por patrón. |
 | `papr-segments/` | Segmentos Markdown independientes para integrar método, pipeline, evaluación, coste y resultados en el paper. |
+| `dashboard/` | Aplicación Streamlit interactiva para explorar métricas, coste, trade-offs, embeddings 3D y exportaciones. |
 | `docs/final_report.md` | Interpretación científica de H1-H5. |
 
 ## Resultados principales
@@ -93,6 +94,26 @@ La carpeta [`papr-segments/`](papr-segments/) contiene cinco archivos Markdown i
 | Ecuaciones de coste y eficiencia | [`papr-segments/04_ecuaciones_coste_eficiencia.md`](papr-segments/04_ecuaciones_coste_eficiencia.md) |
 | Resultados, visualizaciones y citas | [`papr-segments/05_resultados_visualizaciones_citas.md`](papr-segments/05_resultados_visualizaciones_citas.md) |
 
+## Dashboard interactivo
+
+La carpeta [`dashboard/`](dashboard/) contiene una aplicación **Streamlit** para explorar los resultados del benchmark con filtros dinámicos, KPIs, gráficos interactivos, análisis de coste, frontera calidad-coste, embeddings semánticos 3D y exportación de tablas. Esta capa es útil para revisar hipótesis durante la escritura del paper y para preparar anexos interactivos. Streamlit y Plotly permiten construir interfaces analíticas reproducibles y gráficos interactivos directamente desde Python [6] [7].
+
+```bash
+pip install -e .[dashboard]
+streamlit run dashboard/app.py
+```
+
+| Módulo del dashboard | Evidencia que facilita |
+|---|---|
+| Resumen ejecutivo | KPIs por patrón, calidad media, latencia, tokens y utilidad neta. |
+| Calidad y grounding | Comparación de factualidad, completitud, trazabilidad y recuperación. |
+| Coste y eficiencia | Estimación configurable de coste monetario, coste compuesto y penalización operacional. |
+| Trade-offs | Frontera calidad-coste, gráfico 3D calidad-coste-latencia y radar multiobjetivo. |
+| Embeddings 3D | Exploración de geometría semántica por patrón, pregunta, dominio, dificultad y riesgo. |
+| Exportar y metodología | Descarga de datos filtrados y configuración matemática usada en la sesión. |
+
+La documentación completa del dashboard está en [`dashboard/README.md`](dashboard/README.md) y la especificación técnica está en [`dashboard_spec.md`](dashboard_spec.md).
+
 ## Arquitectura
 
 ```text
@@ -118,3 +139,5 @@ El proyecto usa recuperación lexical determinista y generación extractiva cont
 [3]: https://arxiv.org/abs/2308.08155 "A Survey on Large Language Model based Autonomous Agents"
 [4]: https://www.nist.gov/itl/ai-risk-management-framework "NIST AI Risk Management Framework"
 [5]: https://doi.org/10.1137/1.9780898719769.ch5 "Latent Semantic Indexing via Singular Value Decomposition"
+[6]: https://docs.streamlit.io/ "Streamlit Documentation"
+[7]: https://plotly.com/python/ "Plotly Python Graphing Library"
