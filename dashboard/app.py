@@ -10,7 +10,6 @@ outputs already committed in this repository while also accepting user-uploaded 
 
 from __future__ import annotations
 
-import io
 import json
 from pathlib import Path
 from typing import Iterable
@@ -19,8 +18,9 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.utils import PlotlyJSONEncoder
 import streamlit as st
-from PIL import Image
+import streamlit.components.v1 as components
 
 ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = ROOT / "results"
@@ -383,55 +383,6 @@ def camera_eye_from_angles(azimuth_degrees: float, elevation_degrees: float, zoo
     }
 
 
-def infer_camera_controls_from_capture(camera_capture) -> tuple[int, int, float, dict[str, float]]:
-    """Infer a deterministic 3D view from a local browser camera capture.
-
-    Streamlit's native camera component returns a still image rather than a live
-    gesture stream. This function makes the feature operational by mapping the
-    dominant foreground/hand-like region in the capture to azimuth, elevation and
-    zoom controls for the Plotly embedding view.
-    """
-    image = Image.open(io.BytesIO(camera_capture.getvalue())).convert("RGB")
-    image = image.resize((192, 144))
-    arr = np.asarray(image).astype(float) / 255.0
-    red, green, blue = arr[..., 0], arr[..., 1], arr[..., 2]
-    luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
-
-    skin_like = (
-        (red > 0.32)
-        & (green > 0.18)
-        & (blue > 0.10)
-        & (red > green * 1.05)
-        & (red > blue * 1.18)
-        & ((red - green) < 0.45)
-    )
-    foreground = np.abs(luminance - np.median(luminance)) > 0.12
-    mask = skin_like if skin_like.mean() > 0.006 else foreground
-
-    if mask.mean() < 0.003:
-        weights = np.clip(luminance - luminance.min(), 0, None) + 1e-6
-        detection_mode = "luminancia global"
-    else:
-        weights = mask.astype(float) * (0.35 + luminance)
-        detection_mode = "región mano/primer plano"
-
-    yy, xx = np.indices(luminance.shape)
-    total_weight = float(weights.sum()) + 1e-9
-    x_center = float((xx * weights).sum() / total_weight) / max(luminance.shape[1] - 1, 1)
-    y_center = float((yy * weights).sum() / total_weight) / max(luminance.shape[0] - 1, 1)
-    coverage = float(mask.mean())
-
-    azimuth = int(np.clip(round(x_center * 360), 0, 360))
-    elevation = int(np.clip(round(80 - y_center * 100), -20, 90))
-    zoom = float(np.clip(2.55 - coverage * 9.0, 0.70, 2.80))
-    diagnostics = {
-        "x_center": x_center,
-        "y_center": y_center,
-        "coverage": coverage,
-        "detection_mode": detection_mode,
-    }
-    return azimuth, elevation, zoom, diagnostics
-
 
 def plot_embeddings(embeddings: pd.DataFrame, color_by: str, camera_eye: dict[str, float] | None = None) -> go.Figure:
     color_col = color_by if color_by in embeddings else "pattern"
@@ -498,6 +449,222 @@ def download_plotly_html(fig: go.Figure, filename: str) -> None:
         mime="text/html",
         use_container_width=True,
     )
+
+
+def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> None:
+    """Render a self-contained Plotly + webcam controller for real-time 3D navigation."""
+    fig_spec = json.dumps(fig.to_plotly_json(), cls=PlotlyJSONEncoder).replace("</", "<\\/")
+    component_html = f"""
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+  <style>
+    :root {{
+      color-scheme: dark;
+      --bg: #020617;
+      --panel: rgba(15, 23, 42, 0.92);
+      --border: rgba(148, 163, 184, 0.28);
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+    }}
+    body {{ margin: 0; background: transparent; font-family: Inter, Arial, sans-serif; color: var(--text); }}
+    .shell {{ display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 14px; align-items: stretch; }}
+    #plot {{ min-height: {max(height - 80, 520)}px; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; background: rgba(2, 6, 23, 0.70); }}
+    .panel {{ border: 1px solid var(--border); border-radius: 18px; padding: 14px; background: var(--panel); box-shadow: 0 20px 50px rgba(2, 6, 23, 0.22); }}
+    h3 {{ margin: 0 0 8px; font-size: 16px; }}
+    p {{ margin: 8px 0; color: var(--muted); font-size: 13px; line-height: 1.45; }}
+    video {{ width: 100%; aspect-ratio: 4/3; border-radius: 14px; background: #000; object-fit: cover; transform: scaleX(-1); border: 1px solid var(--border); }}
+    .row {{ display: flex; gap: 8px; margin: 10px 0; }}
+    button {{ flex: 1; cursor: pointer; border: 1px solid rgba(56, 189, 248, 0.45); color: #e0f2fe; background: rgba(14, 165, 233, 0.16); border-radius: 12px; padding: 9px 10px; font-weight: 700; }}
+    button:hover {{ background: rgba(14, 165, 233, 0.26); }}
+    button.stop {{ border-color: rgba(248, 113, 113, 0.45); color: #fee2e2; background: rgba(239, 68, 68, 0.16); }}
+    label {{ display: block; color: var(--text); font-size: 12px; font-weight: 700; margin-top: 10px; }}
+    input[type="range"] {{ width: 100%; accent-color: var(--accent); }}
+    .metric {{ display: grid; grid-template-columns: 86px 1fr; gap: 8px; margin-top: 8px; font-size: 12px; }}
+    .metric span:first-child {{ color: var(--muted); }}
+    .status {{ margin-top: 10px; padding: 9px 10px; border-radius: 12px; border: 1px solid var(--border); background: rgba(15, 23, 42, 0.72); color: var(--muted); font-size: 12px; line-height: 1.4; }}
+    .status.ok {{ color: #bbf7d0; border-color: rgba(34, 197, 94, 0.45); }}
+    .status.warn {{ color: #fde68a; border-color: rgba(245, 158, 11, 0.45); }}
+    canvas {{ display: none; }}
+    @media (max-width: 980px) {{ .shell {{ grid-template-columns: 1fr; }} #plot {{ min-height: 560px; }} }}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div id="plot" aria-label="Embedding 3D controlado por cámara"></div>
+    <aside class="panel">
+      <h3>Control en tiempo real</h3>
+      <p>Mueva la mano u objeto dominante frente a la cámara. La posición horizontal controla el azimuth, la vertical controla la elevación y el tamaño detectado ajusta el zoom.</p>
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="sample" width="96" height="72"></canvas>
+      <div class="row">
+        <button id="start">Iniciar</button>
+        <button id="stop" class="stop">Detener</button>
+      </div>
+      <label>Sensibilidad: <span id="sensVal">1.00</span></label>
+      <input id="sensitivity" type="range" min="0.35" max="2.00" step="0.05" value="1.00" />
+      <label>Suavizado: <span id="smoothVal">0.72</span></label>
+      <input id="smooth" type="range" min="0.20" max="0.92" step="0.02" value="0.72" />
+      <div class="metric"><span>Azimuth</span><strong id="azimuth">45°</strong></div>
+      <div class="metric"><span>Elevación</span><strong id="elevation">28°</strong></div>
+      <div class="metric"><span>Zoom</span><strong id="zoom">1.85</strong></div>
+      <div class="metric"><span>Modo</span><strong id="mode">esperando cámara</strong></div>
+      <div id="status" class="status">Pulse Iniciar. El navegador pedirá permiso de cámara; la vista se actualizará de forma continua.</div>
+    </aside>
+  </div>
+  <script>
+    const fig = {fig_spec};
+    const initialCamera = (fig.layout && fig.layout.scene && fig.layout.scene.camera) || {{eye: {{x: 1.35, y: 1.35, z: 0.95}}, up: {{x: 0, y: 0, z: 1}}}};
+    const plotDiv = document.getElementById('plot');
+    Plotly.newPlot(plotDiv, fig.data, fig.layout, {{displayModeBar: true, scrollZoom: true, responsive: true}});
+
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('sample');
+    const ctx = canvas.getContext('2d', {{ willReadFrequently: true }});
+    const startButton = document.getElementById('start');
+    const stopButton = document.getElementById('stop');
+    const statusBox = document.getElementById('status');
+    const sensitivityInput = document.getElementById('sensitivity');
+    const smoothInput = document.getElementById('smooth');
+    const sensVal = document.getElementById('sensVal');
+    const smoothVal = document.getElementById('smoothVal');
+    const azimuthEl = document.getElementById('azimuth');
+    const elevationEl = document.getElementById('elevation');
+    const zoomEl = document.getElementById('zoom');
+    const modeEl = document.getElementById('mode');
+    let stream = null;
+    let rafId = null;
+    let lastUpdate = 0;
+    let smoothState = {{ azimuth: 45, elevation: 28, zoom: 1.85 }};
+
+    function setStatus(message, kind='') {{
+      statusBox.textContent = message;
+      statusBox.className = 'status' + (kind ? ' ' + kind : '');
+    }}
+
+    function cameraEye(azimuthDeg, elevationDeg, zoom) {{
+      const az = azimuthDeg * Math.PI / 180;
+      const el = elevationDeg * Math.PI / 180;
+      return {{
+        x: zoom * Math.cos(el) * Math.cos(az),
+        y: zoom * Math.cos(el) * Math.sin(az),
+        z: zoom * Math.sin(el)
+      }};
+    }}
+
+    function inferControlsFromFrame() {{
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const frame = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let lum = new Float32Array(canvas.width * canvas.height);
+      let sumLum = 0;
+      for (let i = 0, p = 0; i < frame.length; i += 4, p++) {{
+        const r = frame[i] / 255, g = frame[i + 1] / 255, b = frame[i + 2] / 255;
+        const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        lum[p] = y;
+        sumLum += y;
+      }}
+      const meanLum = sumLum / lum.length;
+      let total = 0, xSum = 0, ySum = 0, selected = 0, skinSelected = 0;
+      for (let y = 0, p = 0; y < canvas.height; y++) {{
+        for (let x = 0; x < canvas.width; x++, p++) {{
+          const i = p * 4;
+          const r = frame[i] / 255, g = frame[i + 1] / 255, b = frame[i + 2] / 255;
+          const skin = r > 0.32 && g > 0.18 && b > 0.10 && r > g * 1.05 && r > b * 1.18 && (r - g) < 0.45;
+          const foreground = Math.abs(lum[p] - meanLum) > 0.10;
+          const active = skin || foreground;
+          if (skin) skinSelected++;
+          if (active) {{
+            const weight = (skin ? 1.55 : 0.75) * (0.25 + lum[p]);
+            total += weight;
+            xSum += x * weight;
+            ySum += y * weight;
+            selected++;
+          }}
+        }}
+      }}
+      if (total < 0.0001 || selected < 12) {{
+        return null;
+      }}
+      const xCenter = xSum / total / (canvas.width - 1);
+      const yCenter = ySum / total / (canvas.height - 1);
+      const coverage = selected / lum.length;
+      const sensitivity = parseFloat(sensitivityInput.value);
+      const centeredX = Math.max(0, Math.min(1, 0.5 + (xCenter - 0.5) * sensitivity));
+      const centeredY = Math.max(0, Math.min(1, 0.5 + (yCenter - 0.5) * sensitivity));
+      return {{
+        azimuth: Math.max(0, Math.min(360, centeredX * 360)),
+        elevation: Math.max(-20, Math.min(90, 80 - centeredY * 100)),
+        zoom: Math.max(0.70, Math.min(2.80, 2.55 - coverage * 7.8)),
+        mode: skinSelected > 18 ? 'mano/rostro' : 'primer plano',
+        coverage
+      }};
+    }}
+
+    function tick(now) {{
+      rafId = requestAnimationFrame(tick);
+      if (!stream || video.readyState < 2 || now - lastUpdate < 80) return;
+      lastUpdate = now;
+      const detected = inferControlsFromFrame();
+      if (!detected) {{
+        modeEl.textContent = 'sin objetivo';
+        setStatus('Cámara activa. Coloque una mano u objeto contrastante dentro del encuadre.', 'warn');
+        return;
+      }}
+      const keep = parseFloat(smoothInput.value);
+      const inject = 1 - keep;
+      smoothState.azimuth = smoothState.azimuth * keep + detected.azimuth * inject;
+      smoothState.elevation = smoothState.elevation * keep + detected.elevation * inject;
+      smoothState.zoom = smoothState.zoom * keep + detected.zoom * inject;
+      const eye = cameraEye(smoothState.azimuth, smoothState.elevation, smoothState.zoom);
+      Plotly.relayout(plotDiv, {{
+        'scene.camera.eye': eye,
+        'scene.camera.up': initialCamera.up || {{x: 0, y: 0, z: 1}}
+      }});
+      azimuthEl.textContent = `${{Math.round(smoothState.azimuth)}}°`;
+      elevationEl.textContent = `${{Math.round(smoothState.elevation)}}°`;
+      zoomEl.textContent = smoothState.zoom.toFixed(2);
+      modeEl.textContent = detected.mode;
+      setStatus('Tiempo real activo: el embedding se actualiza continuamente desde la cámara.', 'ok');
+    }}
+
+    async function startCamera() {{
+      try {{
+        stream = await navigator.mediaDevices.getUserMedia({{ video: {{ facingMode: 'user', width: {{ ideal: 640 }}, height: {{ ideal: 480 }} }}, audio: false }});
+        video.srcObject = stream;
+        await video.play();
+        setStatus('Cámara iniciada. Mueva la mano para rotar el embedding 3D.', 'ok');
+        if (!rafId) rafId = requestAnimationFrame(tick);
+      }} catch (err) {{
+        setStatus('No se pudo acceder a la cámara: ' + err.message + '. Use localhost/HTTPS y revise permisos del navegador.', 'warn');
+      }}
+    }}
+
+    function stopCamera() {{
+      if (stream) {{
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+      }}
+      video.srcObject = null;
+      if (rafId) {{ cancelAnimationFrame(rafId); rafId = null; }}
+      setStatus('Cámara detenida. El gráfico queda interactivo con mouse, trackpad o controles de Plotly.');
+    }}
+
+    sensitivityInput.addEventListener('input', () => {{ sensVal.textContent = Number(sensitivityInput.value).toFixed(2); }});
+    smoothInput.addEventListener('input', () => {{ smoothVal.textContent = Number(smoothInput.value).toFixed(2); }});
+    startButton.addEventListener('click', startCamera);
+    stopButton.addEventListener('click', stopCamera);
+    window.addEventListener('beforeunload', stopCamera);
+  </script>
+</body>
+</html>
+"""
+    components.html(component_html, height=height, scrolling=False)
 
 
 # ---------- Sidebar: data and controls ----------
@@ -762,46 +929,19 @@ def main() -> None:
         st.session_state.setdefault("embedding_camera_azimuth", camera_presets["Isométrica para paper"]["azimuth"])
         st.session_state.setdefault("embedding_camera_elevation", camera_presets["Isométrica para paper"]["elevation"])
         st.session_state.setdefault("embedding_camera_zoom", camera_presets["Isométrica para paper"]["zoom"])
-        st.session_state.setdefault("embedding_camera_last_capture", None)
 
         control_col, browser_camera_col = st.columns([1.15, 0.85])
 
         with browser_camera_col:
-            st.markdown("#### Cámara local que controla el embedding")
+            st.markdown("#### Modo cámara en tiempo real")
             st.markdown(
-                "Active la cámara, coloque la mano o un objeto visible dentro del encuadre y pulse **Take Photo**. "
-                "La captura se analiza localmente para mover la cámara virtual del gráfico 3D: izquierda/derecha cambia azimuth, "
-                "arriba/abajo cambia elevación y el área detectada ajusta zoom."
+                "El control por cámara opera en vivo. Seleccione **Tiempo real con cámara** debajo del panel manual y pulse "
+                "**Iniciar** dentro del componente embebido. Ese componente contiene la cámara y el gráfico 3D en el mismo contexto web, "
+                "por lo que puede actualizar Plotly continuamente sin recargar Streamlit."
             )
-            enable_camera = st.toggle(
-                "Activar cámara local",
-                value=False,
-                help="El navegador pedirá permiso. Si no aparece la vista previa, revise permisos del sitio y que la página se abra en localhost o HTTPS.",
+            st.caption(
+                "Los sliders de la izquierda siguen disponibles como fallback manual y como punto inicial de cámara antes de activar el modo tiempo real."
             )
-            if enable_camera:
-                camera_capture = st.camera_input("Captura para controlar la vista 3D")
-                if camera_capture is not None:
-                    capture_bytes = camera_capture.getvalue()
-                    capture_hash = hash(capture_bytes)
-                    if st.session_state["embedding_camera_last_capture"] != capture_hash:
-                        cam_azimuth, cam_elevation, cam_zoom, diagnostics = infer_camera_controls_from_capture(camera_capture)
-                        st.session_state["embedding_camera_azimuth"] = cam_azimuth
-                        st.session_state["embedding_camera_elevation"] = cam_elevation
-                        st.session_state["embedding_camera_zoom"] = cam_zoom
-                        st.session_state["embedding_camera_last_capture"] = capture_hash
-                        st.success(
-                            "Captura aplicada al embedding: "
-                            f"azimuth={cam_azimuth}°, elevación={cam_elevation}°, zoom={cam_zoom:.2f}."
-                        )
-                        st.caption(
-                            "Diagnóstico local: "
-                            f"modo={diagnostics['detection_mode']}, centro=({diagnostics['x_center']:.2f}, {diagnostics['y_center']:.2f}), "
-                            f"cobertura={diagnostics['coverage']:.3f}."
-                        )
-                    else:
-                        st.info("Esta captura ya está aplicada. Tome otra foto para mover de nuevo el embedding.")
-            else:
-                st.caption("La cámara permanece apagada. Use los controles manuales o active el interruptor para controlar el embedding con una captura.")
 
         with control_col:
             st.markdown("#### Cámara virtual del gráfico 3D")
@@ -850,11 +990,24 @@ def main() -> None:
         if not embedding_filtered.empty:
             fig_embeddings = plot_embeddings(embedding_filtered, color_by, camera_eye=camera_eye)
             fig_embeddings.update_layout(height=chart_height)
-            st.plotly_chart(
-                fig_embeddings,
-                use_container_width=True,
-                config={"displayModeBar": True, "scrollZoom": True, "responsive": True},
+            interaction_mode = st.radio(
+                "Modo de interacción del embedding",
+                ["Tiempo real con cámara", "Manual con sliders"],
+                horizontal=True,
+                help="El modo tiempo real usa un componente web que contiene el gráfico y la cámara dentro del mismo iframe para poder actualizar Plotly continuamente.",
             )
+            if interaction_mode == "Tiempo real con cámara":
+                st.info(
+                    "Pulse **Iniciar** dentro del panel embebido. La cámara del navegador controlará el gráfico 3D en tiempo real; "
+                    "no hace falta tomar fotos. Si el navegador bloquea permisos, abra el dashboard en localhost o HTTPS."
+                )
+                render_realtime_embedding_controller(fig_embeddings, height=max(chart_height + 120, 760))
+            else:
+                st.plotly_chart(
+                    fig_embeddings,
+                    use_container_width=True,
+                    config={"displayModeBar": True, "scrollZoom": True, "responsive": True},
+                )
             download_plotly_html(fig_embeddings, "semantic_embeddings_3d.html")
         else:
             st.warning("No hay embeddings disponibles bajo los filtros actuales.")
