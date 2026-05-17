@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-rag-business-patterns"
+version = "1.0.0"
+description = "Benchmark reproducible para comparar RAG mono-agente y patrones multi-agente en tareas empresariales complejas."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "manularrea"}]
+license = {text = "MIT"}
+dependencies = [
+  "pandas>=2.0",
+  "numpy>=1.24",
+  "matplotlib>=3.7",
+  "seaborn>=0.12",
+  "scikit-learn>=1.2",
+  "typer>=0.9",
+  "rich>=13.0",
+  "tabulate>=0.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.4"]
+
+[project.scripts]
+agentic-rag-experiment = "agentic_rag.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests", "scripts"]

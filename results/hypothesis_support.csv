@@ -1,0 +1,6 @@
+hypothesis,finding,evidence
+H1,Soportada con matiz,Calidad promedio multi-agente 0.749 vs Single-Agent 0.644; tokens 131.6 vs 89.0; latencia 431.7 ms vs 220.3 ms.
+H2,Soportada,"En preguntas medium, Parent-Child logra factualidad 1.00, trazabilidad 1.00, completitud 1.00; usa 185.5 tokens frente a 338.0 de Mixture-of-Agents."
+H3,Soportada,"En síntesis, Mixture-of-Agents obtiene completitud 0.929, superior a Parent-Child 0.464 y Single-Agent 0.309; consume 393.5 tokens."
+H4,Soportada,"En preguntas ambiguas/sensibles, Handoff alcanza exactitud de decisión 1.00 y tasa de alucinación 0.00; Single-Agent queda en exactitud 0.00."
+H5,Soportada,"En preguntas simples, Single-Agent alcanza completitud 1.00 y factualidad 1.00, con 88.5 tokens; es competitivo frente a configuraciones multi-agente."

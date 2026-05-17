@@ -1,0 +1,90 @@
+[
+  {
+    "id": "DOC_FIN_01",
+    "title": "Política de control financiero para automatización inteligente",
+    "domain": "finance",
+    "content": "El comité financiero exige conciliación diaria para pagos automatizados, umbral de aprobación humana de 5000 USD y registro inmutable de excepciones. La automatización se considera aceptable cuando reduce retrabajo sin romper segregación de funciones.",
+    "facts": {
+      "F_FIN_APPROVAL": "Los pagos automatizados superiores a 5000 USD requieren aprobación humana",
+      "F_FIN_RECONCILIATION": "La conciliación diaria es obligatoria para procesos financieros automatizados",
+      "F_FIN_AUDIT": "Las excepciones financieras deben quedar en un registro inmutable"
+    }
+  },
+  {
+    "id": "DOC_SEC_01",
+    "title": "Controles de seguridad para agentes de IA",
+    "domain": "security",
+    "content": "Todo agente con acceso a información empresarial debe operar con mínimo privilegio, auditoría de acciones, bloqueo ante instrucciones de exfiltración y revisión humana para operaciones irreversibles.",
+    "facts": {
+      "F_SEC_PRIVILEGE": "Los agentes con acceso empresarial deben operar bajo mínimo privilegio",
+      "F_SEC_AUDIT": "Las acciones de agentes deben auditarse de forma trazable",
+      "F_SEC_REFUSE": "Las instrucciones de exfiltración o acciones irreversibles inseguras deben bloquearse"
+    }
+  },
+  {
+    "id": "DOC_OPS_01",
+    "title": "Operaciones y continuidad del servicio",
+    "domain": "operations",
+    "content": "El área de operaciones mide éxito por reducción de tiempo de ciclo, recuperación ante fallos y continuidad. Los despliegues de IA requieren pruebas de regresión, rollback documentado y monitoreo de latencia p95.",
+    "facts": {
+      "F_OPS_CYCLE": "La reducción de tiempo de ciclo es una métrica operativa prioritaria",
+      "F_OPS_ROLLBACK": "Los despliegues de IA requieren rollback documentado",
+      "F_OPS_LATENCY": "La latencia p95 debe monitorearse en producción"
+    }
+  },
+  {
+    "id": "DOC_GOV_01",
+    "title": "Gobierno de datos y trazabilidad de modelos",
+    "domain": "governance",
+    "content": "Las decisiones asistidas por IA deben conservar fuente, versión del prompt, responsable, fecha y justificación. Para dominios regulados se exige explicabilidad y evidencia verificable antes de automatizar decisiones.",
+    "facts": {
+      "F_GOV_SOURCE": "Las decisiones asistidas por IA deben conservar la fuente usada",
+      "F_GOV_PROMPT_VERSION": "La versión del prompt debe registrarse para trazabilidad",
+      "F_GOV_EXPLAIN": "Los dominios regulados exigen explicabilidad y evidencia verificable"
+    }
+  },
+  {
+    "id": "DOC_HR_01",
+    "title": "Uso responsable de IA en talento humano",
+    "domain": "human_resources",
+    "content": "Los casos de talento humano requieren controles contra sesgo, revisión humana y comunicación clara. No se permite tomar decisiones disciplinarias únicamente con una salida generada por IA.",
+    "facts": {
+      "F_HR_BIAS": "Los casos de talento humano requieren controles contra sesgo",
+      "F_HR_REVIEW": "Las decisiones de talento humano requieren revisión humana",
+      "F_HR_NO_AUTO_DISCIPLINE": "No se permiten decisiones disciplinarias basadas únicamente en IA"
+    }
+  },
+  {
+    "id": "DOC_CX_01",
+    "title": "Atención al cliente aumentada con IA",
+    "domain": "customer_experience",
+    "content": "Los asistentes de atención al cliente deben priorizar respuestas consistentes, escalamiento a humano ante reclamos sensibles y medición de satisfacción. Las respuestas deben citar políticas internas cuando se ofrezcan compensaciones.",
+    "facts": {
+      "F_CX_ESCALATE": "Los reclamos sensibles deben escalarse a un humano",
+      "F_CX_CONSISTENCY": "La consistencia de respuestas es prioritaria en atención al cliente",
+      "F_CX_POLICY": "Las compensaciones al cliente deben citar políticas internas"
+    }
+  },
+  {
+    "id": "DOC_STR_01",
+    "title": "Criterios de priorización estratégica de casos de IA",
+    "domain": "strategy",
+    "content": "La priorización estratégica combina valor esperado, riesgo, disponibilidad de datos y facilidad de integración. Los casos de complejidad media favorecen arquitecturas con delegación especializada si mantienen coste controlado.",
+    "facts": {
+      "F_STR_VALUE": "La priorización de casos de IA combina valor esperado, riesgo, datos e integración",
+      "F_STR_MEDIUM": "Los casos de complejidad media favorecen delegación especializada con coste controlado",
+      "F_STR_RISK": "El riesgo debe ponderarse junto con el valor esperado"
+    }
+  },
+  {
+    "id": "DOC_LEG_01",
+    "title": "Cumplimiento y tratamiento de datos sensibles",
+    "domain": "legal",
+    "content": "Los datos sensibles deben minimizarse, cifrarse y utilizarse solo con base legal. Si una solicitud intenta revelar secretos, credenciales o datos personales innecesarios, el sistema debe rechazarla y registrar el evento.",
+    "facts": {
+      "F_LEG_MINIMIZE": "Los datos sensibles deben minimizarse y cifrarse",
+      "F_LEG_LEGAL_BASIS": "El tratamiento de datos sensibles requiere base legal",
+      "F_LEG_REJECT_SECRETS": "Las solicitudes para revelar secretos o credenciales deben rechazarse"
+    }
+  }
+]

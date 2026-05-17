@@ -1,0 +1,14 @@
+flowchart LR
+    A[Corpus empresarial\ncorpus.json] --> R[KeywordRetriever\nranking determinista]
+    Q[Preguntas evaluadas\nquestions.json] --> R
+    R --> S[Single-Agent RAG\nbaseline mono-agente]
+    R --> P[Parent-Child RAG\ndelegación especializada]
+    R --> M[Mixture-of-Agents\nagentes paralelos + agregador]
+    R --> H[Handoff RAG\nrouting, aclaración y rechazo]
+    S --> E[Métricas reproducibles]
+    P --> E
+    M --> E
+    H --> E
+    E --> C[CSV: detailed, aggregate, hipótesis]
+    E --> F[Figuras científicas]
+    E --> D[Reporte final]
