@@ -627,6 +627,7 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
     button {{ flex: 1; cursor: pointer; border: 1px solid rgba(56, 189, 248, 0.45); color: #e0f2fe; background: rgba(14, 165, 233, 0.16); border-radius: 12px; padding: 9px 10px; font-weight: 700; }}
     button:hover {{ background: rgba(14, 165, 233, 0.26); }}
     button.stop {{ border-color: rgba(248, 113, 113, 0.45); color: #fee2e2; background: rgba(239, 68, 68, 0.16); }}
+    button.secondary {{ width: 100%; margin: 0 0 2px; border-color: rgba(148, 163, 184, 0.42); color: #e5e7eb; background: rgba(30, 41, 59, 0.66); }}
     label {{ display: block; color: var(--text); font-size: 12px; font-weight: 700; margin-top: 10px; }}
     input[type="range"] {{ width: 100%; accent-color: var(--accent); }}
     .metric {{ display: grid; grid-template-columns: 86px 1fr; gap: 8px; margin-top: 8px; font-size: 12px; }}
@@ -643,20 +644,24 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
     <div id="plot" aria-label="Embedding 3D controlado por cámara"></div>
     <aside class="panel">
       <h3>Control en tiempo real</h3>
-      <p>Mueva la mano u objeto dominante frente a la cámara. La posición horizontal controla el azimuth, la vertical controla la elevación y el tamaño detectado ajusta el zoom. La leyenda se oculta en este modo para priorizar que los puntos 3D sean visibles.</p>
+      <p>Mueva la mano u objeto dominante frente a la cámara. La posición horizontal controla el azimuth, la vertical controla la elevación. Acerque la mano para hacer zoom in y aléjela para hacer zoom out. La leyenda se oculta en este modo para priorizar que los puntos 3D sean visibles.</p>
       <video id="video" autoplay playsinline muted></video>
       <canvas id="sample" width="96" height="72"></canvas>
       <div class="row">
         <button id="start">Iniciar</button>
         <button id="stop" class="stop">Detener</button>
       </div>
+      <button id="resetZoom" type="button" class="secondary">Calibrar zoom actual</button>
       <label>Sensibilidad: <span id="sensVal">1.00</span></label>
       <input id="sensitivity" type="range" min="0.35" max="2.00" step="0.05" value="1.00" />
       <label>Suavizado: <span id="smoothVal">0.72</span></label>
       <input id="smooth" type="range" min="0.20" max="0.92" step="0.02" value="0.72" />
+      <label>Fuerza zoom mano: <span id="zoomStrengthVal">1.20</span></label>
+      <input id="zoomStrength" type="range" min="0.40" max="2.60" step="0.05" value="1.20" />
       <div class="metric"><span>Azimuth</span><strong id="azimuth">45°</strong></div>
       <div class="metric"><span>Elevación</span><strong id="elevation">28°</strong></div>
       <div class="metric"><span>Zoom</span><strong id="zoom">1.85</strong></div>
+      <div class="metric"><span>Gesto zoom</span><strong id="zoomGesture">calibrando</strong></div>
       <div class="metric"><span>Modo</span><strong id="mode">esperando cámara</strong></div>
       <div id="status" class="status">Pulse Iniciar. El navegador pedirá permiso de cámara; la vista se actualizará de forma continua.</div>
     </aside>
@@ -685,19 +690,25 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
     const ctx = canvas.getContext('2d', {{ willReadFrequently: true }});
     const startButton = document.getElementById('start');
     const stopButton = document.getElementById('stop');
+    const resetZoomButton = document.getElementById('resetZoom');
     const statusBox = document.getElementById('status');
     const sensitivityInput = document.getElementById('sensitivity');
     const smoothInput = document.getElementById('smooth');
+    const zoomStrengthInput = document.getElementById('zoomStrength');
     const sensVal = document.getElementById('sensVal');
     const smoothVal = document.getElementById('smoothVal');
+    const zoomStrengthVal = document.getElementById('zoomStrengthVal');
     const azimuthEl = document.getElementById('azimuth');
     const elevationEl = document.getElementById('elevation');
     const zoomEl = document.getElementById('zoom');
+    const zoomGestureEl = document.getElementById('zoomGesture');
     const modeEl = document.getElementById('mode');
     let stream = null;
     let rafId = null;
     let lastUpdate = 0;
     let smoothState = {{ azimuth: 45, elevation: 28, zoom: 1.85 }};
+    let baselineCoverage = null;
+    let latestCoverage = null;
 
     function setStatus(message, kind='') {{
       statusBox.textContent = message;
@@ -756,7 +767,6 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
       return {{
         azimuth: Math.max(0, Math.min(360, centeredX * 360)),
         elevation: Math.max(-20, Math.min(90, 80 - centeredY * 100)),
-        zoom: Math.max(0.70, Math.min(2.80, 2.55 - coverage * 7.8)),
         mode: skinSelected > 18 ? 'mano/rostro' : 'primer plano',
         coverage
       }};
@@ -772,11 +782,30 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
         setStatus('Cámara activa. Coloque una mano u objeto contrastante dentro del encuadre.', 'warn');
         return;
       }}
+      if (baselineCoverage === null) {{
+        baselineCoverage = detected.coverage;
+      }}
+      latestCoverage = detected.coverage;
       const keep = parseFloat(smoothInput.value);
       const inject = 1 - keep;
+      const zoomStrength = parseFloat(zoomStrengthInput.value);
+      const safeBaseline = Math.max(0.012, baselineCoverage);
+      const coverageDelta = (detected.coverage - baselineCoverage) / safeBaseline;
+      const deadZone = 0.12;
+      let gestureZoom = 1.85;
+      let gestureLabel = 'mantener';
+      if (coverageDelta > deadZone) {{
+        gestureZoom = Math.max(0.55, 1.85 - (coverageDelta - deadZone) * zoomStrength * 0.90);
+        gestureLabel = 'zoom in';
+      }} else if (coverageDelta < -deadZone) {{
+        gestureZoom = Math.min(3.35, 1.85 + (Math.abs(coverageDelta) - deadZone) * zoomStrength * 0.90);
+        gestureLabel = 'zoom out';
+      }} else {{
+        baselineCoverage = baselineCoverage * 0.985 + detected.coverage * 0.015;
+      }}
       smoothState.azimuth = smoothState.azimuth * keep + detected.azimuth * inject;
       smoothState.elevation = smoothState.elevation * keep + detected.elevation * inject;
-      smoothState.zoom = smoothState.zoom * keep + detected.zoom * inject;
+      smoothState.zoom = smoothState.zoom * keep + gestureZoom * inject;
       const eye = cameraEye(smoothState.azimuth, smoothState.elevation, smoothState.zoom);
       Plotly.relayout(plotDiv, {{
         'scene.camera': {{
@@ -788,8 +817,9 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
       azimuthEl.textContent = `${{Math.round(smoothState.azimuth)}}°`;
       elevationEl.textContent = `${{Math.round(smoothState.elevation)}}°`;
       zoomEl.textContent = smoothState.zoom.toFixed(2);
+      zoomGestureEl.textContent = `${{gestureLabel}} · ${{(coverageDelta * 100).toFixed(0)}}%`;
       modeEl.textContent = detected.mode;
-      setStatus('Tiempo real activo: el embedding se actualiza continuamente desde la cámara.', 'ok');
+      setStatus('Tiempo real activo: acerque la mano para zoom in y aléjela para zoom out.', 'ok');
     }}
 
     async function startCamera() {{
@@ -798,7 +828,10 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
         video.srcObject = stream;
         await video.play();
         Plotly.Plots.resize(plotDiv);
-        setStatus('Cámara iniciada. Mueva la mano para rotar el embedding 3D.', 'ok');
+        baselineCoverage = null;
+        latestCoverage = null;
+        zoomGestureEl.textContent = 'calibrando';
+        setStatus('Cámara iniciada. Mantenga la mano visible; acérquela para zoom in y aléjela para zoom out.', 'ok');
         if (!rafId) rafId = requestAnimationFrame(tick);
       }} catch (err) {{
         setStatus('No se pudo acceder a la cámara: ' + err.message + '. Use localhost/HTTPS y revise permisos del navegador.', 'warn');
@@ -812,11 +845,21 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
       }}
       video.srcObject = null;
       if (rafId) {{ cancelAnimationFrame(rafId); rafId = null; }}
+      baselineCoverage = null;
+      latestCoverage = null;
+      zoomGestureEl.textContent = 'detenido';
       setStatus('Cámara detenida. El gráfico queda interactivo con mouse, trackpad o controles de Plotly.');
     }}
 
     sensitivityInput.addEventListener('input', () => {{ sensVal.textContent = Number(sensitivityInput.value).toFixed(2); }});
     smoothInput.addEventListener('input', () => {{ smoothVal.textContent = Number(smoothInput.value).toFixed(2); }});
+    zoomStrengthInput.addEventListener('input', () => {{ zoomStrengthVal.textContent = Number(zoomStrengthInput.value).toFixed(2); }});
+    resetZoomButton.addEventListener('click', () => {{
+      baselineCoverage = latestCoverage;
+      smoothState.zoom = 1.85;
+      zoomGestureEl.textContent = 'recalibrado';
+      setStatus('Zoom calibrado: esta distancia de mano queda como punto neutro.', 'ok');
+    }});
     startButton.addEventListener('click', startCamera);
     stopButton.addEventListener('click', stopCamera);
     window.addEventListener('resize', () => Plotly.Plots.resize(plotDiv));
