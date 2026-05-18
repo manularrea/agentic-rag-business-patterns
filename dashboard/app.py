@@ -10,6 +10,7 @@ outputs already committed in this repository while also accepting user-uploaded 
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 from typing import Iterable
@@ -18,7 +19,6 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.utils import PlotlyJSONEncoder
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -451,9 +451,152 @@ def download_plotly_html(fig: go.Figure, filename: str) -> None:
     )
 
 
+def _decode_plotly_typed_array(value):
+    """Convert Plotly.py typed-array JSON objects into plain arrays for browser Plotly.js."""
+    if isinstance(value, dict) and "bdata" in value and "dtype" in value:
+        dtype_map = {
+            "f8": np.float64,
+            "f4": np.float32,
+            "i1": np.int8,
+            "i2": np.int16,
+            "i4": np.int32,
+            "i8": np.int64,
+            "u1": np.uint8,
+            "u2": np.uint16,
+            "u4": np.uint32,
+            "u8": np.uint64,
+        }
+        dtype = dtype_map.get(str(value["dtype"]).lower())
+        if dtype is None:
+            return value
+        decoded = np.frombuffer(base64.b64decode(value["bdata"]), dtype=dtype)
+        if "shape" in value:
+            decoded = decoded.reshape(value["shape"])
+        return decoded.tolist()
+    if isinstance(value, dict):
+        return {key: _decode_plotly_typed_array(item) for key, item in value.items()}
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, (np.integer, np.floating)):
+        return value.item()
+    if isinstance(value, list):
+        return [_decode_plotly_typed_array(item) for item in value]
+    return value
+
+
+def _plotly_figure_spec_for_browser(fig: go.Figure) -> str:
+    """Serialize a Plotly figure in a format reliably consumed by Plotly.js in HTML components."""
+    browser_spec = _decode_plotly_typed_array(fig.to_plotly_json())
+    return json.dumps(browser_spec, separators=(",", ":")).replace("</", "<\\/")
+
+
 def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> None:
     """Render a self-contained Plotly + webcam controller for real-time 3D navigation."""
-    fig_spec = json.dumps(fig.to_plotly_json(), cls=PlotlyJSONEncoder).replace("</", "<\\/")
+    realtime_fig = go.Figure(fig)
+
+    # Plotly.js can render the semantic coordinates too compressed in an embedded
+    # iframe because the original PCA-like X axis has a much narrower range than
+    # Y and Z. Normalize only the browser-facing coordinates so the cloud is
+    # visible from the first paint while preserving the original dashboard data.
+    scatter_traces = [trace for trace in realtime_fig.data if getattr(trace, "type", None) == "scatter3d"]
+    axis_values: dict[str, list[float]] = {"x": [], "y": [], "z": []}
+    for trace in scatter_traces:
+        for axis in axis_values:
+            values = getattr(trace, axis, None)
+            if values is not None:
+                axis_values[axis].extend([float(value) for value in values])
+    axis_stats: dict[str, tuple[float, float]] = {}
+    for axis, values in axis_values.items():
+        series = np.asarray(values, dtype=float)
+        center = float(np.nanmean(series)) if series.size else 0.0
+        spread = float(np.nanstd(series)) if series.size else 1.0
+        axis_stats[axis] = (center, spread if spread > 1e-9 else 1.0)
+    for trace in scatter_traces:
+        for axis, (center, spread) in axis_stats.items():
+            values = getattr(trace, axis, None)
+            if values is not None:
+                normalized = ((np.asarray(values, dtype=float) - center) / spread).round(6).tolist()
+                setattr(trace, axis, normalized)
+
+    if scatter_traces:
+        merged_x: list[float] = []
+        merged_y: list[float] = []
+        merged_z: list[float] = []
+        merged_colors: list[str] = []
+        merged_text: list[str] = []
+        for trace in scatter_traces:
+            xs = list(getattr(trace, "x", []) or [])
+            ys = list(getattr(trace, "y", []) or [])
+            zs = list(getattr(trace, "z", []) or [])
+            count = min(len(xs), len(ys), len(zs))
+            marker = getattr(trace, "marker", None)
+            color = getattr(marker, "color", "#e5e7eb") if marker is not None else "#e5e7eb"
+            if isinstance(color, (list, tuple, np.ndarray)):
+                colors = [str(item) for item in list(color)[:count]]
+            else:
+                colors = [str(color)] * count
+            customdata = getattr(trace, "customdata", None)
+            trace_name = str(getattr(trace, "name", "embedding"))
+            for index in range(count):
+                merged_x.append(float(xs[index]))
+                merged_y.append(float(ys[index]))
+                merged_z.append(float(zs[index]))
+                merged_colors.append(colors[index] if index < len(colors) else "#e5e7eb")
+                if customdata is not None and index < len(customdata):
+                    row = list(customdata[index])
+                    label = " · ".join(str(value) for value in row[:4] if str(value))
+                else:
+                    label = trace_name
+                merged_text.append(label)
+        realtime_fig = go.Figure(
+            data=[
+                go.Scatter3d(
+                    x=merged_x,
+                    y=merged_y,
+                    z=merged_z,
+                    mode="markers",
+                    text=merged_text,
+                    hovertemplate="%{text}<br>x=%{x:.2f}<br>y=%{y:.2f}<br>z=%{z:.2f}<extra></extra>",
+                    marker={
+                        "color": merged_colors,
+                        "size": 8,
+                        "opacity": 0.96,
+                        "line": {"width": 1.4, "color": "rgba(226,232,240,0.85)"},
+                    },
+                    name="embeddings",
+                    showlegend=False,
+                )
+            ],
+            layout=realtime_fig.layout,
+        )
+
+    realtime_fig.update_traces(
+        marker={
+            "size": 8,
+            "opacity": 0.96,
+            "line": {"width": 1.4, "color": "rgba(226,232,240,0.85)"},
+        },
+        selector={"type": "scatter3d"},
+    )
+    realtime_fig.update_layout(
+        title={"text": "Embedding 3D semántico", "x": 0.02, "xanchor": "left", "font": {"size": 15}},
+        showlegend=False,
+        margin={"l": 0, "r": 0, "t": 42, "b": 0},
+        scene={
+            "domain": {"x": [0, 1], "y": [0, 1]},
+            "bgcolor": "rgba(2,6,23,0.98)",
+            "xaxis": {"title": "embedding_x normalizado", "range": [-2.9, 2.9], "showbackground": True, "backgroundcolor": "rgba(15,23,42,0.72)", "gridcolor": "rgba(148,163,184,0.22)", "zerolinecolor": "rgba(226,232,240,0.38)"},
+            "yaxis": {"title": "embedding_y normalizado", "range": [-2.9, 2.9], "showbackground": True, "backgroundcolor": "rgba(15,23,42,0.72)", "gridcolor": "rgba(148,163,184,0.22)", "zerolinecolor": "rgba(226,232,240,0.38)"},
+            "zaxis": {"title": "embedding_z normalizado", "range": [-2.9, 2.9], "showbackground": True, "backgroundcolor": "rgba(15,23,42,0.72)", "gridcolor": "rgba(148,163,184,0.22)", "zerolinecolor": "rgba(226,232,240,0.38)"},
+            "aspectmode": "cube",
+            "camera": {
+                "eye": {"x": 1.35, "y": 1.35, "z": 0.95},
+                "up": {"x": 0, "y": 0, "z": 1},
+                "center": {"x": 0, "y": 0, "z": 0},
+            },
+        },
+    )
+    fig_spec = _plotly_figure_spec_for_browser(realtime_fig)
     component_html = f"""
 <!doctype html>
 <html lang="es">
@@ -475,7 +618,7 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
     }}
     body {{ margin: 0; background: transparent; font-family: Inter, Arial, sans-serif; color: var(--text); }}
     .shell {{ display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 14px; align-items: stretch; }}
-    #plot {{ min-height: {max(height - 80, 520)}px; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; background: rgba(2, 6, 23, 0.70); }}
+    #plot {{ width: 100%; height: {max(height - 80, 560)}px; min-height: {max(height - 80, 560)}px; border: 1px solid var(--border); border-radius: 18px; overflow: hidden; background: rgba(2, 6, 23, 0.70); }}
     .panel {{ border: 1px solid var(--border); border-radius: 18px; padding: 14px; background: var(--panel); box-shadow: 0 20px 50px rgba(2, 6, 23, 0.22); }}
     h3 {{ margin: 0 0 8px; font-size: 16px; }}
     p {{ margin: 8px 0; color: var(--muted); font-size: 13px; line-height: 1.45; }}
@@ -491,7 +634,7 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
     .status {{ margin-top: 10px; padding: 9px 10px; border-radius: 12px; border: 1px solid var(--border); background: rgba(15, 23, 42, 0.72); color: var(--muted); font-size: 12px; line-height: 1.4; }}
     .status.ok {{ color: #bbf7d0; border-color: rgba(34, 197, 94, 0.45); }}
     .status.warn {{ color: #fde68a; border-color: rgba(245, 158, 11, 0.45); }}
-    canvas {{ display: none; }}
+    canvas#sample {{ display: none; }}
     @media (max-width: 980px) {{ .shell {{ grid-template-columns: 1fr; }} #plot {{ min-height: 560px; }} }}
   </style>
 </head>
@@ -500,7 +643,7 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
     <div id="plot" aria-label="Embedding 3D controlado por cámara"></div>
     <aside class="panel">
       <h3>Control en tiempo real</h3>
-      <p>Mueva la mano u objeto dominante frente a la cámara. La posición horizontal controla el azimuth, la vertical controla la elevación y el tamaño detectado ajusta el zoom.</p>
+      <p>Mueva la mano u objeto dominante frente a la cámara. La posición horizontal controla el azimuth, la vertical controla la elevación y el tamaño detectado ajusta el zoom. La leyenda se oculta en este modo para priorizar que los puntos 3D sean visibles.</p>
       <video id="video" autoplay playsinline muted></video>
       <canvas id="sample" width="96" height="72"></canvas>
       <div class="row">
@@ -522,7 +665,20 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
     const fig = {fig_spec};
     const initialCamera = (fig.layout && fig.layout.scene && fig.layout.scene.camera) || {{eye: {{x: 1.35, y: 1.35, z: 0.95}}, up: {{x: 0, y: 0, z: 1}}}};
     const plotDiv = document.getElementById('plot');
-    Plotly.newPlot(plotDiv, fig.data, fig.layout, {{displayModeBar: true, scrollZoom: true, responsive: true}});
+    function applyExplicitPlotSize() {{
+      const rect = plotDiv.getBoundingClientRect();
+      const width = Math.max(640, Math.floor(rect.width || plotDiv.clientWidth || 900));
+      const plotHeight = Math.max(560, Math.floor(rect.height || plotDiv.clientHeight || 720));
+      plotDiv.style.width = width + 'px';
+      plotDiv.style.height = plotHeight + 'px';
+      fig.layout.width = width;
+      fig.layout.height = plotHeight;
+    }}
+    applyExplicitPlotSize();
+    Plotly.newPlot(plotDiv, fig.data, fig.layout, {{displayModeBar: true, scrollZoom: true, responsive: true}}).then(() => {{
+      Plotly.Plots.resize(plotDiv);
+      setTimeout(() => {{ applyExplicitPlotSize(); Plotly.relayout(plotDiv, {{width: fig.layout.width, height: fig.layout.height}}); }}, 120);
+    }});
 
     const video = document.getElementById('video');
     const canvas = document.getElementById('sample');
@@ -623,8 +779,11 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
       smoothState.zoom = smoothState.zoom * keep + detected.zoom * inject;
       const eye = cameraEye(smoothState.azimuth, smoothState.elevation, smoothState.zoom);
       Plotly.relayout(plotDiv, {{
-        'scene.camera.eye': eye,
-        'scene.camera.up': initialCamera.up || {{x: 0, y: 0, z: 1}}
+        'scene.camera': {{
+          eye,
+          up: initialCamera.up || {{x: 0, y: 0, z: 1}},
+          center: initialCamera.center || {{x: 0, y: 0, z: 0}}
+        }}
       }});
       azimuthEl.textContent = `${{Math.round(smoothState.azimuth)}}°`;
       elevationEl.textContent = `${{Math.round(smoothState.elevation)}}°`;
@@ -638,6 +797,7 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
         stream = await navigator.mediaDevices.getUserMedia({{ video: {{ facingMode: 'user', width: {{ ideal: 640 }}, height: {{ ideal: 480 }} }}, audio: false }});
         video.srcObject = stream;
         await video.play();
+        Plotly.Plots.resize(plotDiv);
         setStatus('Cámara iniciada. Mueva la mano para rotar el embedding 3D.', 'ok');
         if (!rafId) rafId = requestAnimationFrame(tick);
       }} catch (err) {{
@@ -659,6 +819,8 @@ def render_realtime_embedding_controller(fig: go.Figure, height: int = 760) -> N
     smoothInput.addEventListener('input', () => {{ smoothVal.textContent = Number(smoothInput.value).toFixed(2); }});
     startButton.addEventListener('click', startCamera);
     stopButton.addEventListener('click', stopCamera);
+    window.addEventListener('resize', () => Plotly.Plots.resize(plotDiv));
+    setTimeout(() => Plotly.Plots.resize(plotDiv), 150);
     window.addEventListener('beforeunload', stopCamera);
   </script>
 </body>
